@@ -32,6 +32,10 @@ DEFAULT_ATTRS = {
         default = Label("//:mypy_config"),
         allow_single_file = True,
     ),
+    "stubs_dir_path": attr.string(
+        default = 'shared-utils/py-utils/typing-utils/src/py/stubs',
+        doc = "(str, required): path to mypy stubs directory"
+    )
 }
 
 def _sources_to_cache_map_triples(srcs, is_aspect):
@@ -67,10 +71,12 @@ def _extract_srcs(srcs):
 
 def _extract_transitive_deps(deps):
     transitive_deps = []
+    transitive_imports = []
     for dep in deps:
         if MyPyStubsInfo not in dep and PyInfo in dep and not _is_external_dep(dep):
+            transitive_imports.extend(dep[PyInfo].imports.to_list())
             transitive_deps.append(dep[PyInfo].transitive_sources)
-    return transitive_deps
+    return transitive_deps, transitive_imports
 
 def _extract_stub_deps(deps):
     # Need to add the .py files AND the .pyi files that are
@@ -84,7 +90,7 @@ def _extract_stub_deps(deps):
                         stub_files.append(src_f)
     return stub_files
 
-def _extract_imports(imports, label):
+def _extract_imports(imports, label, transitive_imports):
     # NOTE: Bazel's implementation of this for py_binary, py_test is at
     # src/main/java/com/google/devtools/build/lib/bazel/rules/python/BazelPythonSemantics.java
     mypypath_parts = []
@@ -96,6 +102,10 @@ def _extract_imports(imports, label):
             mypypath_parts.append(label.package)
         else:
             mypypath_parts.append("{}/{}".format(label.package, import_))
+    for transitive_import_ in transitive_imports:
+        new_import = transitive_import_.replace("__main__/", "")
+        if new_import not in mypypath_parts:
+            mypypath_parts.append(new_import)
     return mypypath_parts
 
 def _mypy_rule_impl(ctx, is_aspect = False):
@@ -105,7 +115,7 @@ def _mypy_rule_impl(ctx, is_aspect = False):
 
     mypy_config_file = ctx.file._mypy_config
 
-    mypypath_parts = []
+    mypypath_parts = [ctx.attr.stubs_dir_path]
     direct_src_files = []
     transitive_srcs_depsets = []
     stub_files = []
@@ -114,11 +124,12 @@ def _mypy_rule_impl(ctx, is_aspect = False):
         direct_src_files = _extract_srcs(base_rule.attr.srcs)
 
     if hasattr(base_rule.attr, "deps"):
-        transitive_srcs_depsets = _extract_transitive_deps(base_rule.attr.deps)
+        transitive_srcs_depsets, transitive_srcs_imports = _extract_transitive_deps(base_rule.attr.deps)
         stub_files = _extract_stub_deps(base_rule.attr.deps)
 
     if hasattr(base_rule.attr, "imports"):
-        mypypath_parts = _extract_imports(base_rule.attr.imports, ctx.label)
+        base_imports = base_rule.attr.imports
+        mypypath_parts += _extract_imports(base_imports, ctx.label, transitive_srcs_imports)
 
     final_srcs_depset = depset(transitive = transitive_srcs_depsets +
                                             [depset(direct = direct_src_files)])
