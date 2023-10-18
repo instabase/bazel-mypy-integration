@@ -115,12 +115,10 @@ def _mypy_rule_impl(ctx, is_aspect = False):
 
     mypy_config_file = ctx.file._mypy_config
 
-    # print("ctx.attr.stubs_dir_path", ctx.attr.stubs_dir_path)
     mypypath_parts = [ctx.attr.stubs_dir_path]
     direct_src_files = []
     transitive_srcs_depsets = []
     stub_files = []
-    # print("label : ", ctx.label)
 
     if hasattr(base_rule.attr, "srcs"):
         direct_src_files = _extract_srcs(base_rule.attr.srcs)
@@ -128,24 +126,19 @@ def _mypy_rule_impl(ctx, is_aspect = False):
     if hasattr(base_rule.attr, "deps"):
         transitive_srcs_depsets, transitive_srcs_imports = _extract_transitive_deps(base_rule.attr.deps)
         stub_files = _extract_stub_deps(base_rule.attr.deps)
-        # print("transitive_srcs_depsets : ", transitive_srcs_depsets)
-        # print("stub_files : ", stub_files)
 
     if hasattr(base_rule.attr, "imports"):
         base_imports = base_rule.attr.imports
         mypypath_parts += _extract_imports(base_imports, ctx.label, transitive_srcs_imports)
-        # print("mypypath_parts : ", mypypath_parts)
 
     final_srcs_depset = depset(transitive = transitive_srcs_depsets +
                                             [depset(direct = direct_src_files)])
     src_files = [f for f in final_srcs_depset.to_list() if not _is_external_src(f)]
-    # print("src_files : ", src_files)
     if not src_files:
         return None
 
     mypypath_parts += [src_f.dirname for src_f in stub_files]
     mypypath = ":".join(mypypath_parts)
-    # print("mypypath: ", mypypath)
 
     # Ideally, a file should be passed into this rule. If this is an executable
     # rule, then we default to the implicit executable file, otherwise we create
